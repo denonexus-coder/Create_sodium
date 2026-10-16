@@ -82,6 +82,12 @@ public class OrientedContraptionEntity extends AbstractContraptionEntity {
 
 	public int nonDamageTicks;
 
+	private ContraptionRotationState cachedRotationState;
+	private float cachedRotationStateYaw;
+	private float cachedRotationStatePitch;
+	private float cachedRotationStateYawOffset;
+	private boolean cachedRotationStateValid;
+
 	public OrientedContraptionEntity(EntityType<?> type, Level world) {
 		super(type, world);
 		motionBeforeStall = Vec3.ZERO;
@@ -133,9 +139,13 @@ public class OrientedContraptionEntity extends AbstractContraptionEntity {
 
 	@Override
 	public ContraptionRotationState getRotationState() {
+		float yawOffset = getYawOffset();
+		if (cachedRotationStateValid && pitch == cachedRotationStatePitch && yaw == cachedRotationStateYaw
+			&& yawOffset == cachedRotationStateYawOffset)
+			return cachedRotationState;
+
 		ContraptionRotationState crs = new ContraptionRotationState();
 
-		float yawOffset = getYawOffset();
 		crs.zRotation = pitch;
 		crs.yRotation = -yaw + yawOffset;
 
@@ -144,6 +154,11 @@ public class OrientedContraptionEntity extends AbstractContraptionEntity {
 			crs.yRotation = yawOffset;
 		}
 
+		cachedRotationState = crs;
+		cachedRotationStateYaw = yaw;
+		cachedRotationStatePitch = pitch;
+		cachedRotationStateYawOffset = yawOffset;
+		cachedRotationStateValid = true;
 		return crs;
 	}
 

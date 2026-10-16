@@ -78,6 +78,34 @@ public class ContraptionCollider {
 	private static MutablePair<WeakReference<AbstractContraptionEntity>, Double> safetyLock = new MutablePair<>();
 	private static Map<AbstractContraptionEntity, Map<Player, Double>> remoteSafetyLocks = new WeakHashMap<>();
 
+	private static AABB cachedInflatedEntityBounds;
+	private static double cachedEntityBoundsMinX;
+	private static double cachedEntityBoundsMinY;
+	private static double cachedEntityBoundsMinZ;
+	private static double cachedEntityBoundsMaxX;
+	private static double cachedEntityBoundsMaxY;
+	private static double cachedEntityBoundsMaxZ;
+
+	// The detection area is derived only from the bounding box, so it is reused while that box is unchanged.
+	// Entity#getBoundingBox() hands out a mutable instance that is updated in place, so the components have to
+	// be compared rather than the reference.
+	private static AABB getInflatedEntityBounds(AABB bounds) {
+		if (cachedInflatedEntityBounds == null || bounds.minX != cachedEntityBoundsMinX
+			|| bounds.minY != cachedEntityBoundsMinY || bounds.minZ != cachedEntityBoundsMinZ
+			|| bounds.maxX != cachedEntityBoundsMaxX || bounds.maxY != cachedEntityBoundsMaxY
+			|| bounds.maxZ != cachedEntityBoundsMaxZ) {
+			cachedEntityBoundsMinX = bounds.minX;
+			cachedEntityBoundsMinY = bounds.minY;
+			cachedEntityBoundsMinZ = bounds.minZ;
+			cachedEntityBoundsMaxX = bounds.maxX;
+			cachedEntityBoundsMaxY = bounds.maxY;
+			cachedEntityBoundsMaxZ = bounds.maxZ;
+			cachedInflatedEntityBounds = bounds.inflate(2)
+				.expandTowards(0, 32, 0);
+		}
+		return cachedInflatedEntityBounds;
+	}
+
 	static void collideEntities(AbstractContraptionEntity contraptionEntity) {
 		Level world = contraptionEntity.getCommandSenderWorld();
 		Contraption contraption = contraptionEntity.getContraption();
@@ -100,8 +128,18 @@ public class ContraptionCollider {
 		// After death, multiple refs to the client player may show up in the area
 		boolean skipClientPlayer = false;
 
-		List<Entity> entitiesWithinAABB = world.getEntitiesOfClass(Entity.class, bounds.inflate(2)
-			.expandTowards(0, 32, 0), contraptionEntity::canCollideWith);
+		List<Entity> entitiesWithinAABB = world.getEntitiesOfClass(Entity.class, getInflatedEntityBounds(bounds),
+			contraptionEntity::canCollideWith);
+		if (entitiesWithinAABB.isEmpty())
+			return;
+
+		// Reused for every entity in the area to avoid re-allocating these holders each iteration
+		MutableObject<Vec3> collisionResponse = new MutableObject<>(Vec3.ZERO);
+		MutableObject<Vec3> normal = new MutableObject<>(Vec3.ZERO);
+		MutableObject<Vec3> location = new MutableObject<>(Vec3.ZERO);
+		MutableBoolean surfaceCollision = new MutableBoolean(false);
+		MutableFloat temporalResponse = new MutableFloat(1);
+
 		for (Entity entity : entitiesWithinAABB) {
 			if (!entity.isAlive())
 				continue;
@@ -170,11 +208,11 @@ public class ContraptionCollider {
 
 				});
 
-			MutableObject<Vec3> collisionResponse = new MutableObject<>(Vec3.ZERO);
-			MutableObject<Vec3> normal = new MutableObject<>(Vec3.ZERO);
-			MutableObject<Vec3> location = new MutableObject<>(Vec3.ZERO);
-			MutableBoolean surfaceCollision = new MutableBoolean(false);
-			MutableFloat temporalResponse = new MutableFloat(1);
+			collisionResponse.setValue(Vec3.ZERO);
+			normal.setValue(Vec3.ZERO);
+			location.setValue(Vec3.ZERO);
+			surfaceCollision.setValue(false);
+			temporalResponse.setValue(1);
 			Vec3 obbCenter = obb.getCenter();
 
 			// Apply separation maths

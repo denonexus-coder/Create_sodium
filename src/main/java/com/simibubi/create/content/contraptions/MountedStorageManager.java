@@ -1,6 +1,7 @@
 package com.simibubi.create.content.contraptions;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -190,23 +191,32 @@ public class MountedStorageManager {
 			return;
 		}
 
-		Map<BlockPos, MountedItemStorage> items = new HashMap<>();
-		Map<BlockPos, MountedFluidStorage> fluids = new HashMap<>();
-		this.syncedItems.forEach((pos, storage) -> {
+		// Only allocate the sync maps when there is actually something to send
+		Map<BlockPos, MountedItemStorage> items = null;
+		Map<BlockPos, MountedFluidStorage> fluids = null;
+		for (Map.Entry<BlockPos, SyncedMountedStorage> entry : this.syncedItems.entrySet()) {
+			SyncedMountedStorage storage = entry.getValue();
 			if (storage.isDirty()) {
-				items.put(pos, (MountedItemStorage) storage);
+				if (items == null)
+					items = new HashMap<>();
+				items.put(entry.getKey(), (MountedItemStorage) storage);
 				storage.markClean();
 			}
-		});
-		this.syncedFluids.forEach((pos, storage) -> {
+		}
+		for (Map.Entry<BlockPos, SyncedMountedStorage> entry : this.syncedFluids.entrySet()) {
+			SyncedMountedStorage storage = entry.getValue();
 			if (storage.isDirty()) {
-				fluids.put(pos, (MountedFluidStorage) storage);
+				if (fluids == null)
+					fluids = new HashMap<>();
+				fluids.put(entry.getKey(), (MountedFluidStorage) storage);
 				storage.markClean();
 			}
-		});
+		}
 
-		if (!items.isEmpty() || !fluids.isEmpty()) {
-			MountedStorageSyncPacket packet = new MountedStorageSyncPacket(entity.getId(), items, fluids);
+		if (items != null || fluids != null) {
+			MountedStorageSyncPacket packet = new MountedStorageSyncPacket(entity.getId(),
+				items == null ? Collections.emptyMap() : items,
+				fluids == null ? Collections.emptyMap() : fluids);
 			AllPackets.getChannel().sendToClientsTracking(packet, entity);
 			this.syncCooldown = 8;
 		}

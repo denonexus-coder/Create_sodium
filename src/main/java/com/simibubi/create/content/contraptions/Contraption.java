@@ -116,6 +116,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.level.block.state.properties.PistonType;
 import net.minecraft.world.level.chunk.HashMapPalette;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 import net.minecraft.world.level.material.FluidState;
@@ -162,6 +163,9 @@ public abstract class Contraption {
 	private List<BlockFace> pendingSubContraptions;
 
 	private CompletableFuture<Void> simplifiedEntityColliderProvider;
+
+	// Set when a block change invalidates the cached colliders; the recompute is deferred until they are next read
+	private boolean collidersDirty;
 
 	/**
 	 * All client-only data should be encapsulated here.
@@ -1067,6 +1071,9 @@ public abstract class Contraption {
 				superglue.add(bb);
 		}
 
+		LevelChunk cachedChunk = null;
+		int cachedChunkX = Integer.MIN_VALUE;
+		int cachedChunkZ = Integer.MIN_VALUE;
 		for (StructureBlockInfo block : blocks.values()) {
 			BlockPos add = block.pos().offset(anchor)
 					.offset(offset);
@@ -1092,7 +1099,14 @@ public abstract class Contraption {
 						});
 				});
 
-			world.markAndNotifyBlock(add, world.getChunkAt(add), block.state(), Blocks.AIR.defaultBlockState(), flags,
+			int chunkX = add.getX() >> 4;
+			int chunkZ = add.getZ() >> 4;
+			if (cachedChunk == null || chunkX != cachedChunkX || chunkZ != cachedChunkZ) {
+				cachedChunk = world.getChunkAt(add);
+				cachedChunkX = chunkX;
+				cachedChunkZ = chunkZ;
+			}
+			world.markAndNotifyBlock(add, cachedChunk, block.state(), Blocks.AIR.defaultBlockState(), flags,
 					512);
 			block.state().updateIndirectNeighbourShapes(world, add, flags & -2);
 		}
@@ -1202,11 +1216,21 @@ public abstract class Contraption {
 			}
 		}
 
+		LevelChunk cachedChunk = null;
+		int cachedChunkX = Integer.MIN_VALUE;
+		int cachedChunkZ = Integer.MIN_VALUE;
 		for (StructureBlockInfo block : blocks.values()) {
 			if (!shouldUpdateAfterMovement(block))
 				continue;
 			BlockPos targetPos = transform.apply(block.pos());
-			world.markAndNotifyBlock(targetPos, world.getChunkAt(targetPos), block.state(), block.state(),
+			int chunkX = targetPos.getX() >> 4;
+			int chunkZ = targetPos.getZ() >> 4;
+			if (cachedChunk == null || chunkX != cachedChunkX || chunkZ != cachedChunkZ) {
+				cachedChunk = world.getChunkAt(targetPos);
+				cachedChunkX = chunkX;
+				cachedChunkZ = chunkZ;
+			}
+			world.markAndNotifyBlock(targetPos, cachedChunk, block.state(), block.state(),
 					Block.UPDATE_MOVE_BY_PISTON | Block.UPDATE_ALL, 512);
 		}
 
@@ -1431,11 +1455,16 @@ public abstract class Contraption {
 
 	public void invalidateColliders() {
 		simplifiedEntityColliders = Optional.empty();
-		gatherBBsOffThread();
+		collidersDirty = true;
+		if (simplifiedEntityColliderProvider != null) {
+			simplifiedEntityColliderProvider.cancel(false);
+			simplifiedEntityColliderProvider = null;
+		}
 	}
 
 	private void gatherBBsOffThread() {
 		getContraptionWorld();
+		collidersDirty = false;
 		if (simplifiedEntityColliderProvider != null) {
 			simplifiedEntityColliderProvider.cancel(false);
 		}
@@ -1501,6 +1530,8 @@ public abstract class Contraption {
 	}
 
 	public Optional<List<AABB>> getSimplifiedEntityColliders() {
+		if (collidersDirty)
+			gatherBBsOffThread();
 		return simplifiedEntityColliders;
 	}
 

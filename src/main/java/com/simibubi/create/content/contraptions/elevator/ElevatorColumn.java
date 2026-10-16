@@ -86,9 +86,10 @@ public class ElevatorColumn {
 	}
 
 	public Collection<BlockPos> getContacts() {
-		return contacts.stream()
-			.map(this::contactAt)
-			.toList();
+		List<BlockPos> contactsAt = new ArrayList<>(contacts.size());
+		for (int y : contacts)
+			contactsAt.add(contactAt(y));
+		return contactsAt;
 	}
 
 	public void gatherAll() {

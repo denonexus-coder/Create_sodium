@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.UnaryOperator;
 
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.apache.commons.lang3.tuple.MutablePair;
@@ -93,6 +94,9 @@ public abstract class AbstractContraptionEntity extends Entity implements IEntit
 	protected boolean initialized;
 	protected boolean prevPosInvalid;
 	private boolean skipActorStop;
+
+	// Reused for every actor on every tick instead of allocating a capturing lambda per actor
+	private final UnaryOperator<Vec3> actorRotationOperator = v -> applyRotation(v, 1);
 
 	/*
 	 * staleTicks are a band-aid to prevent a frame or two of missing blocks between
@@ -457,7 +461,7 @@ public abstract class AbstractContraptionEntity extends Entity implements IEntit
 			boolean newPosVisited =
 				!context.stall && shouldActorTrigger(context, blockInfo, actor, actorPosition, gridPosition);
 
-			context.rotation = v -> applyRotation(v, 1);
+			context.rotation = actorRotationOperator;
 			context.position = actorPosition;
 			if (!isActorActive(context, actor) && !actor.mustTickWhileDisabled())
 				continue;

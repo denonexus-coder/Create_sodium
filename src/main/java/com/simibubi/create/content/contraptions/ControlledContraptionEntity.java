@@ -39,6 +39,11 @@ public class ControlledContraptionEntity extends AbstractContraptionEntity {
 	protected float angle;
 	protected float angleDelta;
 
+	private ContraptionRotationState cachedRotationState;
+	private Axis cachedRotationStateAxis;
+	private float cachedRotationStateAngle;
+	private boolean cachedRotationStateValid;
+
 	public ControlledContraptionEntity(EntityType<?> type, Level world) {
 		super(type, world);
 	}
@@ -100,6 +105,9 @@ public class ControlledContraptionEntity extends AbstractContraptionEntity {
 
 	@Override
 	public ContraptionRotationState getRotationState() {
+		if (cachedRotationStateValid && angle == cachedRotationStateAngle && rotationAxis == cachedRotationStateAxis)
+			return cachedRotationState;
+
 		ContraptionRotationState crs = new ContraptionRotationState();
 		if (rotationAxis == Axis.X)
 			crs.xRotation = angle;
@@ -107,6 +115,11 @@ public class ControlledContraptionEntity extends AbstractContraptionEntity {
 			crs.yRotation = angle;
 		if (rotationAxis == Axis.Z)
 			crs.zRotation = angle;
+
+		cachedRotationState = crs;
+		cachedRotationStateAngle = angle;
+		cachedRotationStateAxis = rotationAxis;
+		cachedRotationStateValid = true;
 		return crs;
 	}
 
