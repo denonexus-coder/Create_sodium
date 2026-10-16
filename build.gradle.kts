@@ -50,7 +50,7 @@ configurations.include { extendsFrom(modApiInclude, apiInclude) }
 
 val recipeViewer = "emi"
 val runtimeCc = false
-val runtimeSodium = false
+val runtimeSodium = true
 
 dependencies {
     // setup
