@@ -1,13 +1,13 @@
 package com.simibubi.create.content.logistics.packagerLink;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
 
@@ -76,15 +76,22 @@ public class LogisticallyLinkedBehaviour extends BlockEntityBehaviour {
 			(clientSide ? CLIENT_LINKS : LINKS).getIfPresent(freq);
 		if (cache == null)
 			return Collections.emptyList();
-		Stream<LogisticallyLinkedBehaviour> stream = new LinkedList<>(cache.asMap()
-			.values()).stream()
-			.map(WeakReference::get)
-			.filter(LogisticallyLinkedBehaviour::isValidLink);
+
+		// Build the result directly from the live cache values, avoiding the extra
+		// LinkedList copy and stream pipeline. Only sort when priorities are requested.
+		Collection<WeakReference<LogisticallyLinkedBehaviour>> references = cache.asMap()
+			.values();
+		List<LogisticallyLinkedBehaviour> present = new ArrayList<>(references.size());
+		for (WeakReference<LogisticallyLinkedBehaviour> reference : references) {
+			LogisticallyLinkedBehaviour link = reference.get();
+			if (isValidLink(link))
+				present.add(link);
+		}
 
 		if (sortByPriority)
-			stream = stream.sorted((e1, e2) -> Integer.compare(e1.redstonePower, e2.redstonePower));
+			present.sort((e1, e2) -> Integer.compare(e1.redstonePower, e2.redstonePower));
 
-		return stream.toList();
+		return present;
 	}
 
 	public static void keepAlive(LogisticallyLinkedBehaviour behaviour) {

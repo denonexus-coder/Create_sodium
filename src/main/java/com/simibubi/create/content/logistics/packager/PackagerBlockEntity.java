@@ -97,6 +97,10 @@ public class PackagerBlockEntity extends SmartBlockEntity implements SidedStorag
 
 	private AdvancementBehaviour advancements;
 
+	// Reused buffer for the items pulled during a single attemptToSend, avoiding
+	// a fresh allocation (and its arrays) on every packing operation.
+	private final ItemStackHandler extractedItemsBuffer = new ItemStackHandler(PackageItem.SLOTS);
+
 	//
 
 	public PackagerBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
@@ -397,7 +401,9 @@ public class PackagerBlockEntity extends SmartBlockEntity implements SidedStorag
 			return;
 
 		boolean anyItemPresent = false;
-		ItemStackHandler extractedItems = new ItemStackHandler(PackageItem.SLOTS);
+		ItemStackHandler extractedItems = extractedItemsBuffer;
+		for (int slot = 0; slot < PackageItem.SLOTS; slot++)
+			extractedItems.setStackInSlot(slot, ItemStack.EMPTY);
 		ItemStack extractedPackageItem = ItemStack.EMPTY;
 		PackagingRequest nextRequest = null;
 		String fixedAddress = null;

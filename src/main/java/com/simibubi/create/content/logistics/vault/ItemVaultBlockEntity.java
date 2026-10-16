@@ -110,6 +110,11 @@ public class ItemVaultBlockEntity extends SmartBlockEntity implements IMultiBloc
 		for (int y = 0; y < radius; y++) {
 			for (int z = 0; z < zMax; z++) {
 				for (int x = 0; x < xMax; x++) {
+					// Interior blocks are never adjacent to a neighbor that needs updating,
+					// so skip them entirely instead of looking up their chunk/state.
+					if (x != 0 && x != xMax - 1 && y != 0 && y != radius - 1 && z != 0 && z != zMax - 1)
+						continue;
+
 					// Emulate the effect of this line, but only for blocks along the surface of the vault:
 					// level.updateNeighbourForOutputSignal(pos.offset(x, y, z), getBlockState().getBlock());
 					// That method pokes all 6 directions in order. We want to preserve the update order

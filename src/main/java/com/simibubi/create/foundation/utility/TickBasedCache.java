@@ -33,6 +33,12 @@ public class TickBasedCache<K, V> implements Cache<K, V> {
 	private Map<K, MutableInt> timestamps = new HashMap<>();
 	private ConcurrentHashMap<K, V> map = new ConcurrentHashMap<>();
 
+	// Scratch set reused by cleanUp() to avoid allocating on every access
+	private final Set<K> outdatedKeys = new HashSet<>();
+	// cleanUp() expires entries based on the tick counter, so running it more than
+	// once per tick performs identical work; skip the redundant full scans.
+	private int lastCleanupTick = Integer.MIN_VALUE;
+
 	private int ticksUntilTimeout;
 	private boolean resetTimerOnAccess;
 	private boolean clientSide;
@@ -138,15 +144,21 @@ public class TickBasedCache<K, V> implements Cache<K, V> {
 
 	@Override
 	public void cleanUp() {
-		Set<K> outdated = new HashSet<>();
+		int ticks = ticks();
+		// Nothing can expire between two calls within the same tick.
+		if (ticks == lastCleanupTick)
+			return;
+		lastCleanupTick = ticks;
+
+		outdatedKeys.clear();
 		timestamps.forEach((k, v) -> {
-			if (v.intValue() < ticks() - ticksUntilTimeout)
-				outdated.add(k);
+			if (v.intValue() < ticks - ticksUntilTimeout)
+				outdatedKeys.add(k);
 			if (resetTimerOnAccess)
-				v.setValue(ticks());
+				v.setValue(ticks);
 		});
-		outdated.forEach(map::remove);
-		outdated.forEach(timestamps::remove);
+		outdatedKeys.forEach(map::remove);
+		outdatedKeys.forEach(timestamps::remove);
 	}
 
 }

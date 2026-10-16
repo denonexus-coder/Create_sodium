@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -133,7 +134,7 @@ public class LogisticsManager {
 			}
 		}
 
-		List<LogisticallyLinkedBehaviour> usedLinks = new ArrayList<>();
+		IdentityHashMap<LogisticallyLinkedBehaviour, Integer> usedLinks = new IdentityHashMap<>();
 		MutableBoolean finalLinkTracker = new MutableBoolean(false);
 
 		// First box needs to carry the order specifics for successful defrag
@@ -149,7 +150,8 @@ public class LogisticsManager {
 			ItemStack requestedItem = entry.stack;
 
 			for (LogisticallyLinkedBehaviour link : availableLinks) {
-				int usedIndex = usedLinks.indexOf(link);
+				Integer usedIndexObject = usedLinks.get(link);
+				int usedIndex = usedIndexObject == null ? -1 : usedIndexObject;
 				int linkIndex = usedIndex == -1 ? usedLinks.size() : usedIndex;
 				MutableBoolean isFinalLink = new MutableBoolean(false);
 				if (linkIndex == usedLinks.size() - 1)
@@ -167,7 +169,7 @@ public class LogisticsManager {
 						.getCount();
 				if (processedCount > 0 && usedIndex == -1) {
 					context = null;
-					usedLinks.add(link);
+					usedLinks.put(link, usedLinks.size());
 					finalLinkTracker = isFinalLink;
 				}
 

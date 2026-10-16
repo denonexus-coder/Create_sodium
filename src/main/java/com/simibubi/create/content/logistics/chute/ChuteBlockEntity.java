@@ -91,6 +91,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 	LerpedFloat itemPosition;
 	ChuteItemHandler itemHandler;
 	boolean canPickUpItems;
+	boolean canPickUpItemsDirty;
 
 	float bottomPullDistance;
 	float beltBelowOffset;
@@ -132,6 +133,12 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 
 	// Cached per-tick, useful when a lot of items are waiting on top of it
 	public boolean canDirectlyInsertCached() {
+		// Lazy per-tick refresh: compute at most once per tick and only when it is
+		// actually queried, rather than eagerly every tick for every chute.
+		if (canPickUpItemsDirty && level != null && !level.isClientSide) {
+			canPickUpItemsDirty = false;
+			canPickUpItems = canDirectlyInsert();
+		}
 		return canPickUpItems;
 	}
 
@@ -142,7 +149,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 			return false;
 		if (AbstractChuteBlock.getChuteFacing(blockStateAbove) == Direction.DOWN)
 			return false;
-		if (getItemMotion() > 0 && getInputChutes().isEmpty())
+		if (getItemMotion() > 0 && !hasInputChute())
 			return false;
 		return AbstractChuteBlock.isOpenChute(blockState);
 	}
@@ -163,7 +170,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 		super.tick();
 
 		if (!level.isClientSide)
-			canPickUpItems = canDirectlyInsert();
+			canPickUpItemsDirty = true;
 
 		boolean clientSide = level != null && level.isClientSide && !isVirtual();
 		float itemMotion = getItemMotion();
@@ -206,6 +213,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 
 	private void updateAirFlow(float itemSpeed) {
 		updateAirFlow = false;
+		float previousBottomPullDistance = bottomPullDistance;
 		// airCurrent.rebuild();
 		if (itemSpeed > 0 && level != null && !level.isClientSide) {
 			float speed = pull - push;
@@ -238,7 +246,9 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 			}
 			this.bottomPullDistance = Math.max(0, flowLimit);
 		}
-		sendData();
+		// Only sync when the synced airflow distance actually changed
+		if (bottomPullDistance != previousBottomPullDistance)
+			sendData();
 	}
 
 	private void findEntities(float itemSpeed) {
@@ -299,6 +309,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 
 	public void blockBelowChanged() {
 		updateAirFlow = true;
+		canPickUpItemsDirty = true;
 	}
 
 	private void spawnParticles(float itemMotion) {
@@ -642,6 +653,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 			return;
 		pull = totalPull;
 		updateAirFlow = true;
+		canPickUpItemsDirty = true;
 		sendData();
 		ChuteBlockEntity targetChute = getTargetChute(getBlockState());
 		if (targetChute != null)
@@ -654,6 +666,7 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 			return;
 		updateAirFlow = true;
 		push = totalPush;
+		canPickUpItemsDirty = true;
 		sendData();
 		propagatePush();
 	}
@@ -719,6 +732,14 @@ public class ChuteBlockEntity extends SmartBlockEntity implements IHaveGoggleInf
 		if (be instanceof ChuteBlockEntity)
 			return (ChuteBlockEntity) be;
 		return null;
+	}
+
+	private boolean hasInputChute() {
+		for (Direction d : Iterate.directions) {
+			if (getInputChute(d) != null)
+				return true;
+		}
+		return false;
 	}
 
 	private List<ChuteBlockEntity> getInputChutes() {
