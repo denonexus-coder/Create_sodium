@@ -45,6 +45,11 @@ public class PressingBehaviour extends BeltProcessingBehaviour {
 
 	int entityScanCooldown;
 
+	// Short-lived cache of "does this item have a pressing recipe" results, so the
+	// recipe lookup is not repeated for the same items every entity scan.
+	private static final int WORLD_RECIPE_CACHE_TTL = 40;
+	private final List<WorldRecipeCache> worldRecipeCache = new ArrayList<>();
+
 	public interface PressingBehaviourSpecifics {
 		public boolean tryProcessInBasin(boolean simulate);
 
@@ -153,7 +158,7 @@ public class PressingBehaviour extends BeltProcessingBehaviour {
 						new AABB(worldPosition.below()).deflate(.125f))) {
 						if (!itemEntity.isAlive() || !itemEntity.onGround())
 							continue;
-						if (!specifics.tryProcessInWorld(itemEntity, true))
+						if (!tryProcessInWorldCached(itemEntity, level))
 							continue;
 						start(Mode.WORLD);
 						return;
@@ -239,6 +244,28 @@ public class PressingBehaviour extends BeltProcessingBehaviour {
 		}
 	}
 
+	protected boolean tryProcessInWorldCached(ItemEntity itemEntity, Level level) {
+		ItemStack stack = itemEntity.getItem();
+		long now = level.getGameTime();
+
+		for (int i = worldRecipeCache.size() - 1; i >= 0; i--) {
+			WorldRecipeCache entry = worldRecipeCache.get(i);
+			if (entry.expiresAt < now) {
+				worldRecipeCache.remove(i);
+				continue;
+			}
+			if (ItemStack.isSameItemSameTags(entry.stack, stack))
+				return entry.processable;
+		}
+
+		if (worldRecipeCache.size() >= 64)
+			worldRecipeCache.clear();
+
+		boolean processable = specifics.tryProcessInWorld(itemEntity, true);
+		worldRecipeCache.add(new WorldRecipeCache(stack.copy(), processable, now + WORLD_RECIPE_CACHE_TTL));
+		return processable;
+	}
+
 	public int getRunningTickSpeed() {
 		float speed = specifics.getKineticSpeed();
 		if (speed == 0)
@@ -301,6 +328,18 @@ public class PressingBehaviour extends BeltProcessingBehaviour {
 
 		Mode(float headOffset) {
 			this.headOffset = headOffset;
+		}
+	}
+
+	private static class WorldRecipeCache {
+		private final ItemStack stack;
+		private final boolean processable;
+		private final long expiresAt;
+
+		private WorldRecipeCache(ItemStack stack, boolean processable, long expiresAt) {
+			this.stack = stack;
+			this.processable = processable;
+			this.expiresAt = expiresAt;
 		}
 	}
 

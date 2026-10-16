@@ -337,8 +337,8 @@ public class AirCurrent {
 
 	public void findEntities() {
 		caughtEntities.clear();
-		caughtEntities = source.getAirCurrentWorld()
-			.getEntities(null, bounds);
+		caughtEntities.addAll(source.getAirCurrentWorld()
+			.getEntities(null, bounds));
 	}
 
 	@Nullable

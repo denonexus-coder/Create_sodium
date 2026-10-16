@@ -27,16 +27,17 @@ public class BeltFunnelInteractionHandler {
 		int step = beltMovementPositive ? 1 : -1;
 		firstUpcomingSegment = Mth.clamp(firstUpcomingSegment, 0, beltInventory.belt.beltLength - 1);
 
+		Level world = beltInventory.belt.getLevel();
+		Direction movementFacing = beltInventory.belt.getMovementFacing();
+
 		for (int segment = firstUpcomingSegment; beltMovementPositive ? segment <= nextOffset
 			: segment + 1 >= nextOffset; segment += step) {
 			BlockPos funnelPos = BeltHelper.getPositionForOffset(beltInventory.belt, segment)
 				.above();
-			Level world = beltInventory.belt.getLevel();
 			BlockState funnelState = world.getBlockState(funnelPos);
 			if (!(funnelState.getBlock() instanceof BeltFunnelBlock))
 				continue;
 			Direction funnelFacing = funnelState.getValue(BeltFunnelBlock.HORIZONTAL_FACING);
-			Direction movementFacing = beltInventory.belt.getMovementFacing();
 			boolean blocking = funnelFacing == movementFacing.getOpposite();
 			if (funnelFacing == movementFacing)
 				continue;

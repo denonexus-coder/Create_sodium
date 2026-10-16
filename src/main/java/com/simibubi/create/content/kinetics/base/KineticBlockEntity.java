@@ -104,7 +104,7 @@ public class KineticBlockEntity extends SmartBlockEntity implements IHaveGoggleI
 		preventSpeedUpdate = 0;
 
 		if (level.isClientSide) {
-			EnvExecutor.runWhenOn(EnvType.CLIENT, () -> () -> this.tickAudio());
+			tickAudio();
 			return;
 		}
 
@@ -153,11 +153,13 @@ public class KineticBlockEntity extends SmartBlockEntity implements IHaveGoggleI
 
 	public void updateFromNetwork(float maxStress, float currentStress, int networkSize) {
 		networkDirty = false;
+		boolean changed = this.capacity != maxStress || this.stress != currentStress || this.networkSize != networkSize;
 		this.capacity = maxStress;
 		this.stress = currentStress;
 		this.networkSize = networkSize;
 		boolean overStressed = maxStress < currentStress && StressImpact.isEnabled();
-		setChanged();
+		if (changed)
+			setChanged();
 
 		if (overStressed != this.overStressed) {
 			float prevSpeed = getSpeed();
@@ -556,14 +558,17 @@ public class KineticBlockEntity extends SmartBlockEntity implements IHaveGoggleI
 			return neighbours;
 
 		Axis axis = block.getRotationAxis(state);
-		BlockPos.betweenClosedStream(new BlockPos(-1, -1, -1), new BlockPos(1, 1, 1))
-			.forEach(offset -> {
-				if (axis.choose(offset.getX(), offset.getY(), offset.getZ()) != 0)
-					return;
-				if (offset.distSqr(BlockPos.ZERO) != 2)
-					return;
-				neighbours.add(worldPosition.offset(offset));
-			});
+		for (int z = -1; z <= 1; z++) {
+			for (int y = -1; y <= 1; y++) {
+				for (int x = -1; x <= 1; x++) {
+					if (axis.choose(x, y, z) != 0)
+						continue;
+					if (x * x + y * y + z * z != 2)
+						continue;
+					neighbours.add(worldPosition.offset(x, y, z));
+				}
+			}
+		}
 		return neighbours;
 	}
 

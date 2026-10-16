@@ -2,8 +2,14 @@ package com.simibubi.create.content.kinetics;
 
 import static net.minecraft.world.level.block.state.properties.BlockStateProperties.AXIS;
 
-import java.util.LinkedList;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.base.DirectionalShaftHalvesBlockEntity;
@@ -214,13 +220,31 @@ public class RotationPropagator {
 	/**
 	 * Search for sourceless networks attached to the given entity and update them.
 	 *
-	 * @param currentTE
+	 * @param startTE
 	 */
-	private static void propagateNewSource(KineticBlockEntity currentTE) {
-		BlockPos pos = currentTE.getBlockPos();
-		Level world = currentTE.getLevel();
+	private static void propagateNewSource(KineticBlockEntity startTE) {
+		// Explicit depth-first stack replacing the previous recursive implementation.
+		// Each frame keeps its own neighbour iterator so the visit order (and therefore
+		// the propagation result) matches the recursive version exactly, while avoiding
+		// a StackOverflowError on large networks.
+		Deque<PropagationFrame> stack = new ArrayDeque<>();
+		// Updates are batched so every affected block entity is synced at most once.
+		Set<KineticBlockEntity> toSendData = Collections.newSetFromMap(new IdentityHashMap<>());
+		stack.push(new PropagationFrame(startTE, getConnectedNeighbours(startTE)));
 
-		for (KineticBlockEntity neighbourTE : getConnectedNeighbours(currentTE)) {
+		while (!stack.isEmpty()) {
+			PropagationFrame frame = stack.peek();
+			KineticBlockEntity currentTE = frame.blockEntity;
+
+			if (!frame.neighbours.hasNext()) {
+				stack.pop();
+				continue;
+			}
+
+			KineticBlockEntity neighbourTE = frame.neighbours.next();
+			BlockPos pos = currentTE.getBlockPos();
+			Level world = currentTE.getLevel();
+
 			float speedOfCurrent = currentTE.getTheoreticalSpeed();
 			float speedOfNeighbour = neighbourTE.getTheoreticalSpeed();
 			float newSpeed = getConveyedSpeed(currentTE, neighbourTE);
@@ -239,13 +263,15 @@ public class RotationPropagator {
 			boolean speedChangedTooOften = currentTE.getFlickerScore() > MAX_FLICKER_SCORE;
 			if (tooFast || speedChangedTooOften) {
 				world.destroyBlock(pos, true);
-				return;
+				stack.pop();
+				continue;
 			}
 
 			// Opposite directions
 			if (incompatible) {
 				world.destroyBlock(pos, true);
-				return;
+				stack.pop();
+				continue;
 
 				// Same direction: overpower the slower speed
 			} else {
@@ -256,10 +282,13 @@ public class RotationPropagator {
 					currentTE.setSource(neighbourTE.getBlockPos());
 					currentTE.setSpeed(getConveyedSpeed(neighbourTE, currentTE));
 					currentTE.onSpeedChanged(prevSpeed);
-					currentTE.sendData();
+					toSendData.add(currentTE);
 
-					propagateNewSource(currentTE);
-					return;
+					// Equivalent to the recursive self call followed by a return:
+					// abandon this frame and revisit the (just changed) current entity.
+					stack.pop();
+					stack.push(new PropagationFrame(currentTE, getConnectedNeighbours(currentTE)));
+					continue;
 				}
 
 				// Current faster, overpower the neighbours' tree
@@ -280,8 +309,8 @@ public class RotationPropagator {
 					neighbourTE.setSource(currentTE.getBlockPos());
 					neighbourTE.setSpeed(getConveyedSpeed(currentTE, neighbourTE));
 					neighbourTE.onSpeedChanged(prevSpeed);
-					neighbourTE.sendData();
-					propagateNewSource(neighbourTE);
+					toSendData.add(neighbourTE);
+					stack.push(new PropagationFrame(neighbourTE, getConnectedNeighbours(neighbourTE)));
 					continue;
 				}
 			}
@@ -293,9 +322,22 @@ public class RotationPropagator {
 			neighbourTE.setSpeed(newSpeed);
 			neighbourTE.setSource(currentTE.getBlockPos());
 			neighbourTE.onSpeedChanged(prevSpeed);
-			neighbourTE.sendData();
-			propagateNewSource(neighbourTE);
+			toSendData.add(neighbourTE);
+			stack.push(new PropagationFrame(neighbourTE, getConnectedNeighbours(neighbourTE)));
 
+		}
+
+		for (KineticBlockEntity be : toSendData)
+			be.sendData();
+	}
+
+	private static final class PropagationFrame {
+		private final KineticBlockEntity blockEntity;
+		private final Iterator<KineticBlockEntity> neighbours;
+
+		private PropagationFrame(KineticBlockEntity blockEntity, List<KineticBlockEntity> neighbours) {
+			this.blockEntity = blockEntity;
+			this.neighbours = neighbours.iterator();
 		}
 	}
 
@@ -339,13 +381,13 @@ public class RotationPropagator {
 	private static void propagateMissingSource(KineticBlockEntity updateTE) {
 		final Level world = updateTE.getLevel();
 
-		List<KineticBlockEntity> potentialNewSources = new LinkedList<>();
-		List<BlockPos> frontier = new LinkedList<>();
+		List<KineticBlockEntity> potentialNewSources = new ArrayList<>();
+		Deque<BlockPos> frontier = new ArrayDeque<>();
 		frontier.add(updateTE.getBlockPos());
 		BlockPos missingSource = updateTE.hasSource() ? updateTE.source : null;
 
 		while (!frontier.isEmpty()) {
-			final BlockPos pos = frontier.remove(0);
+			final BlockPos pos = frontier.poll();
 			BlockEntity blockEntity = world.getBlockEntity(pos);
 			if (!(blockEntity instanceof KineticBlockEntity currentBE))
 				continue;
@@ -408,7 +450,7 @@ public class RotationPropagator {
 	}
 
 	private static List<KineticBlockEntity> getConnectedNeighbours(KineticBlockEntity be) {
-		List<KineticBlockEntity> neighbours = new LinkedList<>();
+		List<KineticBlockEntity> neighbours = new ArrayList<>();
 		for (BlockPos neighbourPos : getPotentialNeighbourLocations(be)) {
 			final KineticBlockEntity neighbourBE = findConnectedNeighbour(be, neighbourPos);
 			if (neighbourBE == null)
@@ -420,7 +462,7 @@ public class RotationPropagator {
 	}
 
 	private static List<BlockPos> getPotentialNeighbourLocations(KineticBlockEntity be) {
-		List<BlockPos> neighbours = new LinkedList<>();
+		List<BlockPos> neighbours = new ArrayList<>();
 		BlockPos blockPos = be.getBlockPos();
 		Level level = be.getLevel();
 

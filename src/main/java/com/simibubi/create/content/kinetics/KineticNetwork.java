@@ -18,10 +18,21 @@ public class KineticNetwork {
 	private float unloadedCapacity;
 	private float unloadedStress;
 	private int unloadedMembers;
+	// Actual (speed-scaled) contribution of each loaded source/member. Kept in
+	// sync with the base values in sources/members so the running sums can be
+	// updated with a plain delta instead of a full recompute.
+	private final Map<KineticBlockEntity, Float> sourceContributions;
+	private final Map<KineticBlockEntity, Float> memberContributions;
+	// When either sum can no longer be trusted as the exact result of a full
+	// recompute we fall back to recalculating it instead of applying deltas.
+	private boolean capacityDirty;
+	private boolean stressDirty;
 
 	public KineticNetwork() {
 		sources = new HashMap<>();
 		members = new HashMap<>();
+		sourceContributions = new HashMap<>();
+		memberContributions = new HashMap<>();
 	}
 
 	public void initFromTE(float maxStress, float currentStress, int members) {
@@ -53,6 +64,8 @@ public class KineticNetwork {
 			unloadedCapacity = 0;
 		if (unloadedStress < 0)
 			unloadedStress = 0;
+		capacityDirty = true;
+		stressDirty = true;
 	}
 
 	public void add(KineticBlockEntity be) {
@@ -63,16 +76,42 @@ public class KineticNetwork {
 		members.put(be, be.calculateStressApplied());
 		updateFromNetwork(be);
 		be.networkDirty = true;
+		capacityDirty = true;
+		stressDirty = true;
 	}
 
 	public void updateCapacityFor(KineticBlockEntity be, float capacity) {
+		if (capacityDirty) {
+			sources.put(be, capacity);
+			updateCapacity();
+			return;
+		}
+		float oldCapacity = sourceContributions.getOrDefault(be, 0f);
 		sources.put(be, capacity);
-		updateCapacity();
+		float newCapacity = capacity * getStressMultiplierForSpeed(be.getGeneratedSpeed());
+		sourceContributions.put(be, newCapacity);
+		float newMaxStress = currentCapacity + newCapacity - oldCapacity;
+		if (currentCapacity != newMaxStress) {
+			currentCapacity = newMaxStress;
+			sync();
+		}
 	}
 
 	public void updateStressFor(KineticBlockEntity be, float stress) {
+		if (stressDirty) {
+			members.put(be, stress);
+			updateStress();
+			return;
+		}
+		float oldStress = memberContributions.getOrDefault(be, 0f);
 		members.put(be, stress);
-		updateStress();
+		float newStress = stress * getStressMultiplierForSpeed(be.getTheoreticalSpeed());
+		memberContributions.put(be, newStress);
+		float newTotalStress = currentStress + newStress - oldStress;
+		if (currentStress != newTotalStress) {
+			currentStress = newTotalStress;
+			sync();
+		}
 	}
 
 	public void remove(KineticBlockEntity be) {
@@ -81,6 +120,8 @@ public class KineticNetwork {
 		if (be.isSource())
 			sources.remove(be);
 		members.remove(be);
+		capacityDirty = true;
+		stressDirty = true;
 		be.updateFromNetwork(0, 0, 0);
 
 		if (members.isEmpty()) {
@@ -89,10 +130,10 @@ public class KineticNetwork {
 			return;
 		}
 
-		members.keySet()
-			.stream()
-			.findFirst()
-			.map(member -> member.networkDirty = true);
+		for (KineticBlockEntity member : members.keySet()) {
+			member.networkDirty = true;
+			break;
+		}
 	}
 
 	public void sync() {
@@ -106,6 +147,7 @@ public class KineticNetwork {
 
 	public void updateCapacity() {
 		float newMaxStress = calculateCapacity();
+		capacityDirty = false;
 		if (currentCapacity != newMaxStress) {
 			currentCapacity = newMaxStress;
 			sync();
@@ -114,6 +156,7 @@ public class KineticNetwork {
 
 	public void updateStress() {
 		float newStress = calculateStress();
+		stressDirty = false;
 		if (currentStress != newStress) {
 			currentStress = newStress;
 			sync();
@@ -123,6 +166,8 @@ public class KineticNetwork {
 	public void updateNetwork() {
 		float newStress = calculateStress();
 		float newMaxStress = calculateCapacity();
+		capacityDirty = false;
+		stressDirty = false;
 		if (currentStress != newStress || currentCapacity != newMaxStress) {
 			currentStress = newStress;
 			currentCapacity = newMaxStress;
@@ -132,6 +177,7 @@ public class KineticNetwork {
 
 	public float calculateCapacity() {
 		float presentCapacity = 0;
+		sourceContributions.clear();
 		for (Iterator<KineticBlockEntity> iterator = sources.keySet()
 			.iterator(); iterator.hasNext();) {
 			KineticBlockEntity be = iterator.next();
@@ -140,7 +186,9 @@ public class KineticNetwork {
 				iterator.remove();
 				continue;
 			}
-			presentCapacity += getActualCapacityOf(be);
+			float actual = getActualCapacityOf(be);
+			sourceContributions.put(be, actual);
+			presentCapacity += actual;
 		}
 		float newMaxStress = presentCapacity + unloadedCapacity;
 		return newMaxStress;
@@ -148,6 +196,7 @@ public class KineticNetwork {
 
 	public float calculateStress() {
 		float presentStress = 0;
+		memberContributions.clear();
 		for (Iterator<KineticBlockEntity> iterator = members.keySet()
 			.iterator(); iterator.hasNext();) {
 			KineticBlockEntity be = iterator.next();
@@ -156,7 +205,9 @@ public class KineticNetwork {
 				iterator.remove();
 				continue;
 			}
-			presentStress += getActualStressOf(be);
+			float actual = getActualStressOf(be);
+			memberContributions.put(be, actual);
+			presentStress += actual;
 		}
 		float newStress = presentStress + unloadedStress;
 		return newStress;

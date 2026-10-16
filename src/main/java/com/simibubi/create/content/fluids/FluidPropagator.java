@@ -1,5 +1,6 @@
 package com.simibubi.create.content.fluids;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -46,7 +47,7 @@ public class FluidPropagator {
 	}
 
 	public static void propagateChangedPipe(LevelAccessor world, BlockPos pipePos, BlockState pipeState) {
-		List<Pair<Integer, BlockPos>> frontier = new ArrayList<>();
+		ArrayDeque<Pair<Integer, BlockPos>> frontier = new ArrayDeque<>();
 		Set<BlockPos> visited = new HashSet<>();
 		Set<Pair<PumpBlockEntity, Direction>> discoveredPumps = new HashSet<>();
 
@@ -54,7 +55,7 @@ public class FluidPropagator {
 
 		// Visit all connected pumps to update their network
 		while (!frontier.isEmpty()) {
-			Pair<Integer, BlockPos> pair = frontier.remove(0);
+			Pair<Integer, BlockPos> pair = frontier.poll();
 			BlockPos currentPos = pair.getSecond();
 			if (visited.contains(currentPos))
 				continue;
@@ -97,12 +98,12 @@ public class FluidPropagator {
 	}
 
 	public static void resetAffectedFluidNetworks(Level world, BlockPos start, Direction side) {
-		List<BlockPos> frontier = new ArrayList<>();
+		ArrayDeque<BlockPos> frontier = new ArrayDeque<>();
 		Set<BlockPos> visited = new HashSet<>();
 		frontier.add(start);
 
 		while (!frontier.isEmpty()) {
-			BlockPos pos = frontier.remove(0);
+			BlockPos pos = frontier.poll();
 			if (visited.contains(pos))
 				continue;
 			visited.add(pos);

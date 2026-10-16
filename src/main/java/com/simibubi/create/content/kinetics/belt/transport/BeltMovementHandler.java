@@ -71,7 +71,8 @@ public class BeltMovementHandler {
 		BlockPos pos = info.lastCollidedPos;
 		Level world = beltBE.getLevel();
 		BlockEntity be = world.getBlockEntity(pos);
-		BlockEntity blockEntityBelowPassenger = world.getBlockEntity(entityIn.blockPosition());
+		BlockPos belowPos = entityIn.blockPosition();
+		BlockEntity blockEntityBelowPassenger = pos.equals(belowPos) ? be : world.getBlockEntity(belowPos);
 		BlockState blockState = info.lastCollidedState;
 		Direction movementFacing =
 			Direction.fromAxisAndDirection(blockState.getValue(BlockStateProperties.HORIZONTAL_FACING)
@@ -97,8 +98,13 @@ public class BeltMovementHandler {
 
 		// Lock entities in place
 		boolean isPlayer = entityIn instanceof Player;
-		if (entityIn instanceof LivingEntity && !isPlayer) 
-			((LivingEntity) entityIn).addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 10, 1, false, false));
+		if (entityIn instanceof LivingEntity && !isPlayer) {
+			LivingEntity living = (LivingEntity) entityIn;
+			MobEffectInstance current = living.getEffect(MobEffects.MOVEMENT_SLOWDOWN);
+			// Only (re)apply when the effect would actually be refreshed/extended; avoids redundant S2C packets
+			if (current == null || current.getAmplifier() < 1 || current.getDuration() < 10)
+				living.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 10, 1, false, false));
+		}
 
 		final Direction beltFacing = blockState.getValue(BlockStateProperties.HORIZONTAL_FACING);
 		final BeltSlope slope = blockState.getValue(BeltBlock.SLOPE);
@@ -153,8 +159,7 @@ public class BeltMovementHandler {
 			Vec3 checkDistance = movement.normalize()
 				.scale(0.5);
 			AABB bb = entityIn.getBoundingBox();
-			AABB checkBB = new AABB(bb.minX, bb.minY, bb.minZ, bb.maxX, bb.maxY, bb.maxZ);
-			checkBB = checkBB.move(checkDistance)
+			AABB checkBB = bb.move(checkDistance)
 				.inflate(-Math.abs(checkDistance.x), -Math.abs(checkDistance.y), -Math.abs(checkDistance.z));
 			List<Entity> list = world.getEntities(entityIn, checkBB);
 			list.removeIf(e -> shouldIgnoreBlocking(entityIn, e));

@@ -27,16 +27,17 @@ public class BeltCrusherInteractionHandler {
 		int step = beltMovementPositive ? 1 : -1;
 		firstUpcomingSegment = Mth.clamp(firstUpcomingSegment, 0, beltInventory.belt.beltLength - 1);
 
+		Level world = beltInventory.belt.getLevel();
+		Direction movementFacing = beltInventory.belt.getMovementFacing();
+
 		for (int segment = firstUpcomingSegment; beltMovementPositive ? segment <= nextOffset
 			: segment + 1 >= nextOffset; segment += step) {
 			BlockPos crusherPos = BeltHelper.getPositionForOffset(beltInventory.belt, segment)
 				.above();
-			Level world = beltInventory.belt.getLevel();
 			BlockState crusherState = world.getBlockState(crusherPos);
 			if (!(crusherState.getBlock() instanceof CrushingWheelControllerBlock))
 				continue;
 			Direction crusherFacing = crusherState.getValue(CrushingWheelControllerBlock.FACING);
-			Direction movementFacing = beltInventory.belt.getMovementFacing();
 			if (crusherFacing != movementFacing)
 				continue;
 

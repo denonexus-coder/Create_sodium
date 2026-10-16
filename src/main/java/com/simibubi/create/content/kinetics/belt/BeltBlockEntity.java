@@ -67,6 +67,9 @@ public class BeltBlockEntity extends KineticBlockEntity implements SidedStorageB
 	protected Storage<ItemVariant> itemHandler;
 	public VersionedInventoryTrackerBehaviour invVersionTracker;
 
+	// Retry delay used when initBelt() could not resolve the belt (e.g. controller chunk not loaded yet)
+	protected int initBeltCooldown;
+
 	public CompoundTag trackerUpdateTag;
 
 	public static enum CasingType {
@@ -94,8 +97,16 @@ public class BeltBlockEntity extends KineticBlockEntity implements SidedStorageB
 	@Override
 	public void tick() {
 		// Init belt
-		if (beltLength == 0)
-			BeltBlock.initBelt(level, worldPosition);
+		if (beltLength == 0) {
+			if (initBeltCooldown > 0)
+				initBeltCooldown--;
+			else {
+				BeltBlock.initBelt(level, worldPosition);
+				// Could not resolve yet (e.g. controller chunk unloaded): back off before retrying
+				if (beltLength == 0)
+					initBeltCooldown = 20;
+			}
+		}
 
 		super.tick();
 
@@ -250,6 +261,7 @@ public class BeltBlockEntity extends KineticBlockEntity implements SidedStorageB
 		beltLength = 0;
 		index = 0;
 		controller = null;
+		initBeltCooldown = 0;
 		trackerUpdateTag = new CompoundTag();
 	}
 

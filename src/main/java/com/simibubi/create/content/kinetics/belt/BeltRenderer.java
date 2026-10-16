@@ -1,6 +1,7 @@
 package com.simibubi.create.content.kinetics.belt;
 
 import java.util.Random;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -44,10 +45,19 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 public class BeltRenderer extends SafeBlockEntityRenderer<BeltBlockEntity> {
+
+	// Hoisted out of the per-item render path to avoid allocating lambdas every frame.
+	// The class reference is only resolved when the predicate is actually invoked, so it stays
+	// safe on installs without Sandwichable (the call site short-circuits on Mods.SANDWICHABLE).
+	private static final Predicate<ItemStack> SANDWICH_PREDICATE = stack -> stack.is(ItemsRegistry.SANDWICH);
+
+	private final MutableBlockPos mutablePos = new MutableBlockPos();
+	private final Random random = new Random();
 
 	public BeltRenderer(BlockEntityRendererProvider.Context context) {}
 
@@ -232,7 +242,6 @@ public class BeltRenderer extends SafeBlockEntityRenderer<BeltBlockEntity> {
 		boolean onContraption, TransportedItemStack transported, Vec3 beltStartOffset) {
 		Minecraft mc = Minecraft.getInstance();
 		ItemRenderer itemRenderer = mc.getItemRenderer();
-		MutableBlockPos mutablePos = new MutableBlockPos();
 
 
 
@@ -291,13 +300,13 @@ public class BeltRenderer extends SafeBlockEntityRenderer<BeltBlockEntity> {
 		BakedModel bakedModel = itemRenderer.getModel(transported.stack, be.getLevel(), null, 0);
 		boolean blockItem = bakedModel.isGui3d();
 
-		Boolean sandwich = Mods.SANDWICHABLE.runIfInstalled(() -> () -> transported.stack.is(ItemsRegistry.SANDWICH)).orElse(Boolean.FALSE);
+		boolean sandwich = Mods.SANDWICHABLE.isLoaded() && SANDWICH_PREDICATE.test(transported.stack);
 			if (sandwich)
 				blockItem = false;
 			int count = 0;
 			if (be.getLevel() instanceof PonderLevel || mc.player.getEyePosition(1.0F).distanceTo(itemPos) < 16)
 				count = (int) (Mth.log2((int) (transported.stack.getCount()))) / 2;
-			Random r = new Random(transported.angle);
+			random.setSeed(transported.angle);
 
 		boolean slopeShadowOnly = renderUpright && onSlope;
 		float slopeOffset = 1 / 8f;
@@ -339,7 +348,7 @@ public class BeltRenderer extends SafeBlockEntityRenderer<BeltBlockEntity> {
 			}
 
 			if (blockItem && !box)
-				ms.translate(r.nextFloat() * .0625f * i, 0, r.nextFloat() * .0625f * i);
+				ms.translate(random.nextFloat() * .0625f * i, 0, random.nextFloat() * .0625f * i);
 
 			if (box) {
 				ms.translate(0, 4 / 16f, 0);

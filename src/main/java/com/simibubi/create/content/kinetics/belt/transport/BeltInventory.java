@@ -2,6 +2,7 @@ package com.simibubi.create.content.kinetics.belt.transport;
 
 import static com.simibubi.create.content.kinetics.belt.transport.BeltTunnelInteractionHandler.flapTunnel;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -19,6 +20,9 @@ import com.simibubi.create.content.kinetics.belt.behaviour.BeltProcessingBehavio
 import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
 import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour;
 import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour.TransportedResult;
+import com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlock;
+import com.simibubi.create.content.logistics.funnel.BeltFunnelBlock;
+import com.simibubi.create.content.logistics.tunnel.BeltTunnelBlock;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.utility.BlockHelper;
 import com.simibubi.create.foundation.utility.ServerSpeedProvider;
@@ -32,6 +36,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.Vec3;
 
 import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
@@ -47,6 +52,10 @@ public class BeltInventory {
 
 	TransportedItemStack lazyClientItem;
 
+	// Lazily computed once per tick: whether any funnel/tunnel/crusher sits on this belt at all.
+	private boolean attachmentsResolved;
+	private boolean beltHasAttachmentsCached;
+
 	public final ToInsertSnapshotParticipant toInsertSnapshotParticipant = new ToInsertSnapshotParticipant();
 	public final ItemsSnapshotParticipant itemsSnapshotParticipant = new ItemsSnapshotParticipant();
 
@@ -58,6 +67,9 @@ public class BeltInventory {
 	}
 
 	public void tick() {
+
+		// Recompute attachment presence at most once per belt tick
+		attachmentsResolved = false;
 
 		// Residual item for "smooth" transitions
 		if (lazyClientItem != null) {
@@ -166,23 +178,26 @@ public class BeltInventory {
 					continue;
 			}
 // Belt Funnels
-			if (BeltFunnelInteractionHandler.checkForFunnels(this, currentItem, nextOffset))
-				continue;
-			if (currentItem.stack.isEmpty()) {
-				// fabric: don't hold on to empty stacks, they cause crashes
-				// there's already a check for this above, but checkForFunnels modifies the stack
-				iterator.remove();
-				continue;
+			if (beltHasAttachments()) {
+				if (BeltFunnelInteractionHandler.checkForFunnels(this, currentItem, nextOffset))
+					continue;
+				if (currentItem.stack.isEmpty()) {
+					// fabric: don't hold on to empty stacks, they cause crashes
+					// there's already a check for this above, but checkForFunnels modifies the stack
+					iterator.remove();
+					continue;
+				}
 			}
 			if (noMovement)
 				continue;
 
 			// Belt Tunnels
-			if (BeltTunnelInteractionHandler.flapTunnelsAndCheckIfStuck(this, currentItem, nextOffset))
+			if (beltHasAttachments()
+				&& BeltTunnelInteractionHandler.flapTunnelsAndCheckIfStuck(this, currentItem, nextOffset))
 				continue;
 
 			// Horizontal Crushing Wheels
-			if (BeltCrusherInteractionHandler.checkForCrushers(this, currentItem, nextOffset))
+			if (beltHasAttachments() && BeltCrusherInteractionHandler.checkForCrushers(this, currentItem, nextOffset))
 				continue;
 
 			// Apply Movement
@@ -241,6 +256,27 @@ public class BeltInventory {
 		}
 	}
 
+	private boolean beltHasAttachments() {
+		if (attachmentsResolved)
+			return beltHasAttachmentsCached;
+		attachmentsResolved = true;
+		Level world = belt.getLevel();
+		int length = belt.beltLength;
+		// Offsets -1..length cover the upcoming segments the handlers may query
+		for (int segment = -1; segment <= length; segment++) {
+			Block block = world.getBlockState(BeltHelper.getPositionForOffset(belt, segment)
+					.above())
+				.getBlock();
+			if (block instanceof BeltFunnelBlock || block instanceof CrushingWheelControllerBlock
+				|| block instanceof BeltTunnelBlock) {
+				beltHasAttachmentsCached = true;
+				return true;
+			}
+		}
+		beltHasAttachmentsCached = false;
+		return false;
+	}
+
 	protected boolean handleBeltProcessingAndCheckIfRemoved(TransportedItemStack currentItem, float nextOffset,
 															boolean noMovement) {
 		int currentSegment = (int) currentItem.beltPosition;
@@ -283,15 +319,17 @@ public class BeltInventory {
 			for (int segment = firstUpcomingSegment; beltMovementPositive ? segment + .5f <= nextOffset
 				: segment + .5f >= nextOffset; segment += step) {
 
-				BeltProcessingBehaviour processingBehaviour = getBeltProcessingAtSegment(segment);
+				BlockPos segmentPos = BeltHelper.getPositionForOffset(belt, segment);
+				BeltProcessingBehaviour processingBehaviour =
+					BlockEntityBehaviour.get(belt.getLevel(), segmentPos.above(2), BeltProcessingBehaviour.TYPE);
 				TransportedItemStackHandlerBehaviour stackHandlerBehaviour =
-					getTransportedItemStackHandlerAtSegment(segment);
+					BlockEntityBehaviour.get(belt.getLevel(), segmentPos, TransportedItemStackHandlerBehaviour.TYPE);
 
 				if (processingBehaviour == null)
 					continue;
 				if (stackHandlerBehaviour == null)
 					continue;
-				if (BeltProcessingBehaviour.isBlocked(belt.getLevel(), BeltHelper.getPositionForOffset(belt, segment)))
+				if (BeltProcessingBehaviour.isBlocked(belt.getLevel(), segmentPos))
 					continue;
 
 				ProcessingResult result = processingBehaviour.handleReceivedItem(currentItem, stackHandlerBehaviour);
@@ -499,7 +537,7 @@ public class BeltInventory {
 	public class ToInsertSnapshotParticipant extends SnapshotParticipant<List<TransportedItemStack>> {
 		@Override
 		protected List<TransportedItemStack> createSnapshot() {
-			List<TransportedItemStack> snapshot = new LinkedList<>();
+			List<TransportedItemStack> snapshot = new ArrayList<>(toInsert.size());
 			toInsert.forEach(stack -> snapshot.add(stack.fullCopy()));
 			return snapshot;
 		}
@@ -519,7 +557,7 @@ public class BeltInventory {
 	public class ItemsSnapshotParticipant extends SnapshotParticipant<List<TransportedItemStack>> {
 		@Override
 		protected List<TransportedItemStack> createSnapshot() {
-			List<TransportedItemStack> snapshot = new LinkedList<>();
+			List<TransportedItemStack> snapshot = new ArrayList<>(items.size());
 			items.forEach(stack -> snapshot.add(stack.fullCopy()));
 			return snapshot;
 		}
