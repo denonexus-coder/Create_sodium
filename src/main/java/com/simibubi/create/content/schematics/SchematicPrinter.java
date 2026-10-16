@@ -51,6 +51,11 @@ public class SchematicPrinter {
 	private PrintStage printStage;
 	private List<BlockPos> deferredBlocks;
 
+	// Cache of the last computed block requirement, keyed by the target's block state.
+	// Block states are canonical, so identity comparison is enough.
+	private BlockState cachedRequirementState;
+	private ItemRequirement cachedRequirement;
+
 	public SchematicPrinter() {
 		printingEntityIndex = -1;
 		printStage = PrintStage.BLOCKS;
@@ -123,6 +128,8 @@ public class SchematicPrinter {
 		printingEntityIndex = -1;
 		printStage = PrintStage.BLOCKS;
 		deferredBlocks.clear();
+		cachedRequirementState = null;
+		cachedRequirement = null;
 		BoundingBox bounds = blockReader.getBounds();
 		currentPos = new BlockPos(bounds.minX() - 1, bounds.minY(), bounds.minZ());
 		schematicLoaded = true;
@@ -137,6 +144,8 @@ public class SchematicPrinter {
 		printingEntityIndex = -1;
 		printStage = PrintStage.BLOCKS;
 		deferredBlocks.clear();
+		cachedRequirementState = null;
+		cachedRequirement = null;
 	}
 
 	public boolean isLoaded() {
@@ -249,6 +258,9 @@ public class SchematicPrinter {
 
 		BlockPos target = getCurrentTarget();
 		BlockState blockState = BlockHelper.setZeroAge(blockReader.getBlockState(target));
+		if (blockState == cachedRequirementState)
+			return cachedRequirement;
+
 		BlockEntity blockEntity = null;
 		if (blockState.hasBlockEntity()) {
 			blockEntity = ((EntityBlock) blockState.getBlock()).newBlockEntity(target, blockState);
@@ -256,7 +268,10 @@ public class SchematicPrinter {
 			if (blockEntity != null && data != null)
 				blockEntity.load(data);
 		}
-		return ItemRequirement.of(blockState, blockEntity);
+		ItemRequirement requirement = ItemRequirement.of(blockState, blockEntity);
+		cachedRequirementState = blockState;
+		cachedRequirement = requirement;
+		return requirement;
 	}
 
 	public int markAllBlockRequirements(MaterialChecklist checklist, Level world, PlacementPredicate predicate) {

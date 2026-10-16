@@ -2,6 +2,7 @@ package com.simibubi.create.content.trains.graph;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -373,7 +374,8 @@ public class TrackGraph {
 	public Map<TrackNode, TrackEdge> getConnectionsFrom(TrackNode node) {
 		if (node == null)
 			return null;
-		return connectionsByNode.getOrDefault(node, new HashMap<>());
+		Map<TrackNode, TrackEdge> map = connectionsByNode.get(node);
+		return map != null ? map : Collections.emptyMap();
 	}
 
 	public TrackEdge getConnection(Couple<TrackNode> nodes) {

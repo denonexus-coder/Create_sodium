@@ -104,11 +104,11 @@ public class GlobalRailwayManager {
 		sync = new TrackGraphSync();
 		movingTrains = new LinkedList<>();
 		waitingTrains = new LinkedList<>();
-		GlobalTrainDisplayData.statusByDestination.clear();
+		GlobalTrainDisplayData.clear();
 	}
 
 	public void markTracksDirty() {
-		if (savedData != null)
+		if (savedData != null && !savedData.isDirty())
 			savedData.setDirty();
 	}
 

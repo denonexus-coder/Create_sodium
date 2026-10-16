@@ -74,6 +74,7 @@ public class SchematicannonBlockEntity extends SmartBlockEntity implements MenuP
 
 	public static final int NEIGHBOUR_CHECKING = 100;
 	public static final int MAX_ANCHOR_DISTANCE = 256;
+	public static final int SEND_UPDATE_INTERVAL = 5;
 
 	// Inventory
 	public SchematicannonInventory inventory;
@@ -91,6 +92,7 @@ public class SchematicannonBlockEntity extends SmartBlockEntity implements MenuP
 	private int printerCooldown;
 	private int skipsLeft;
 	private boolean blockSkipped;
+	private int sendUpdateCooldown;
 
 	public BlockPos previousTarget;
 	public List<LaunchedItem> flyingBlocks;
@@ -301,8 +303,13 @@ public class SchematicannonBlockEntity extends SmartBlockEntity implements MenuP
 			schematicProgress = (float) blocksPlaced / blocksToPlace;
 
 		// Update Client block entity
-		if (sendUpdate) {
+		// Throttle the (expensive) block update packet, but keep the pending flag until it
+		// is actually sent so the final state always reaches the client.
+		if (sendUpdateCooldown > 0)
+			sendUpdateCooldown--;
+		if (sendUpdate && sendUpdateCooldown <= 0) {
 			sendUpdate = false;
+			sendUpdateCooldown = SEND_UPDATE_INTERVAL;
 			level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 6);
 		}
 	}

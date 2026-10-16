@@ -19,7 +19,9 @@ import org.apache.commons.lang3.mutable.MutableDouble;
 import org.apache.commons.lang3.mutable.MutableObject;
 
 import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.entity.TravellingPoint.IEdgePointListener;
 import com.simibubi.create.content.trains.entity.TravellingPoint.ITrackSelector;
+import com.simibubi.create.content.trains.entity.TravellingPoint.ITurnListener;
 import com.simibubi.create.content.trains.graph.DimensionPalette;
 import com.simibubi.create.content.trains.graph.DiscoveredPath;
 import com.simibubi.create.content.trains.graph.EdgeData;
@@ -62,6 +64,96 @@ public class Navigation {
 	private Map<UUID, Pair<SignalBoundary, Boolean>> waitingForChainedGroups;
 	public double distanceToSignal;
 	public int ticksWaitingForSignal;
+
+	// Reused across ticks to avoid allocations during signal scouting
+	private final MutableDouble curveDistanceTracker = new MutableDouble(-1);
+	private final MutableDouble crossSignalDistanceTracker = new MutableDouble(-1);
+	private final MutableObject<Pair<UUID, Boolean>> trackingCrossSignal = new MutableObject<>();
+	private double scoutScanDistance;
+	private double scoutBrakingDistanceNoFlicker;
+
+	private final IEdgePointListener signalScoutSignalListener = (distance, couple) -> {
+		// > scanDistance and not following down a cross signal
+		boolean crossSignalTracked = trackingCrossSignal.getValue() != null;
+		if (!crossSignalTracked && distance > scoutScanDistance)
+			return true;
+
+		Couple<TrackNode> nodes = couple.getSecond();
+		TrackEdgePoint boundary = couple.getFirst();
+		if (boundary == destination && ((GlobalStation) boundary).canApproachFrom(nodes.getSecond()))
+			return true;
+		if (!(boundary instanceof SignalBoundary signal))
+			return false;
+
+		UUID entering = signal.getGroup(nodes.getSecond());
+		SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(entering);
+		if (signalEdgeGroup == null)
+			return false;
+
+		boolean primary = entering.equals(signal.groups.getFirst());
+		boolean crossSignal = signal.types.get(primary) == SignalType.CROSS_SIGNAL;
+		boolean occupied = !train.manualTick
+			&& (signal.isForcedRed(nodes.getSecond()) || signalEdgeGroup.isOccupiedUnless(train));
+
+		if (!crossSignalTracked) {
+			if (crossSignal) { // Now entering cross signal path
+				trackingCrossSignal.setValue(Pair.of(boundary.id, primary));
+				crossSignalDistanceTracker.setValue(distance);
+				waitingForChainedGroups.put(entering, Pair.of(signal, primary));
+			}
+			if (occupied) { // Section is occupied
+				waitingForSignal = Pair.of(boundary.id, primary);
+				distanceToSignal = distance;
+				if (!crossSignal)
+					return true; // Standard entry signal, do not collect any further segments
+			}
+			if (!occupied && !crossSignal && distance < distanceToSignal + .25
+				&& distance < scoutBrakingDistanceNoFlicker)
+				signalEdgeGroup.reserved = signal; // Reserve group for traversal
+			return false;
+		}
+
+		if (crossSignalTracked) {
+			waitingForChainedGroups.put(entering, Pair.of(signal, primary)); // Add group to chain
+			if (occupied) { // Section is occupied, but wait at the cross signal that started the chain
+				waitingForSignal = trackingCrossSignal.getValue();
+				distanceToSignal = crossSignalDistanceTracker.doubleValue();
+				if (!crossSignal)
+					return true; // Entry signals end a chain
+			}
+			if (!crossSignal) {
+				if (distance < distanceToSignal + .25) {
+					// Collect and reset the signal chain because none were blocked
+					trackingCrossSignal.setValue(null);
+					reserveChain();
+					return false;
+				} else
+					return true; // End of a blocked signal chain
+			}
+		}
+
+		return false;
+	};
+
+	private final ITurnListener signalScoutTurnListener = (distance, edge) -> {
+		BezierConnection turn = edge.getTurn();
+		double vDistance = Math.abs(turn.starts.getFirst().y - turn.starts.getSecond().y);
+
+		// ignore turn if its a straight & mild slope
+		if (turn != null && vDistance > 1 / 16f) {
+			if (turn.axes.getFirst()
+				.multiply(1, 0, 1)
+				.distanceTo(turn.axes.getSecond()
+					.multiply(1, 0, 1)
+					.scale(-1)) < 1 / 64f
+				&& vDistance / turn.getLength() < .225f)
+				return;
+		}
+
+		float current = curveDistanceTracker.floatValue();
+		if (current == -1 || distance < current)
+			curveDistanceTracker.setValue(distance);
+	};
 
 	public Navigation(Train train) {
 		this.train = train;
@@ -124,104 +216,24 @@ public class Navigation {
 			}
 
 			if (distanceToSignal > 1 / 16f) {
-				MutableDouble curveDistanceTracker = new MutableDouble(-1);
+				curveDistanceTracker.setValue(-1);
 
 				signalScout.node1 = leadingPoint.node1;
 				signalScout.node2 = leadingPoint.node2;
 				signalScout.edge = leadingPoint.edge;
 				signalScout.position = leadingPoint.position;
 
-				double brakingDistanceNoFlicker = brakingDistance + 3 - (brakingDistance % 3);
-				double scanDistance = Mth.clamp(brakingDistanceNoFlicker, preDepartureLookAhead, distanceToDestination);
+				scoutBrakingDistanceNoFlicker = brakingDistance + 3 - (brakingDistance % 3);
+				scoutScanDistance = Mth.clamp(scoutBrakingDistanceNoFlicker, preDepartureLookAhead, distanceToDestination);
 
-				MutableDouble crossSignalDistanceTracker = new MutableDouble(-1);
-				MutableObject<Pair<UUID, Boolean>> trackingCrossSignal = new MutableObject<>(null);
+				crossSignalDistanceTracker.setValue(-1);
+				trackingCrossSignal.setValue(null);
 				waitingForChainedGroups.clear();
 
 				// Adding 50 to the distance due to unresolved inaccuracies in
 				// TravellingPoint::travel
 				signalScout.travel(train.graph, (distanceToDestination + 50) * speedMod, controlSignalScout(),
-					(distance, couple) -> {
-						// > scanDistance and not following down a cross signal
-						boolean crossSignalTracked = trackingCrossSignal.getValue() != null;
-						if (!crossSignalTracked && distance > scanDistance)
-							return true;
-
-						Couple<TrackNode> nodes = couple.getSecond();
-						TrackEdgePoint boundary = couple.getFirst();
-						if (boundary == destination && ((GlobalStation) boundary).canApproachFrom(nodes.getSecond()))
-							return true;
-						if (!(boundary instanceof SignalBoundary signal))
-							return false;
-
-						UUID entering = signal.getGroup(nodes.getSecond());
-						SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(entering);
-						if (signalEdgeGroup == null)
-							return false;
-
-						boolean primary = entering.equals(signal.groups.getFirst());
-						boolean crossSignal = signal.types.get(primary) == SignalType.CROSS_SIGNAL;
-						boolean occupied = !train.manualTick
-							&& (signal.isForcedRed(nodes.getSecond()) || signalEdgeGroup.isOccupiedUnless(train));
-
-						if (!crossSignalTracked) {
-							if (crossSignal) { // Now entering cross signal path
-								trackingCrossSignal.setValue(Pair.of(boundary.id, primary));
-								crossSignalDistanceTracker.setValue(distance);
-								waitingForChainedGroups.put(entering, Pair.of(signal, primary));
-							}
-							if (occupied) { // Section is occupied
-								waitingForSignal = Pair.of(boundary.id, primary);
-								distanceToSignal = distance;
-								if (!crossSignal)
-									return true; // Standard entry signal, do not collect any further segments
-							}
-							if (!occupied && !crossSignal && distance < distanceToSignal + .25
-								&& distance < brakingDistanceNoFlicker)
-								signalEdgeGroup.reserved = signal; // Reserve group for traversal
-							return false;
-						}
-
-						if (crossSignalTracked) {
-							waitingForChainedGroups.put(entering, Pair.of(signal, primary)); // Add group to chain
-							if (occupied) { // Section is occupied, but wait at the cross signal that started the chain
-								waitingForSignal = trackingCrossSignal.getValue();
-								distanceToSignal = crossSignalDistanceTracker.doubleValue();
-								if (!crossSignal)
-									return true; // Entry signals end a chain
-							}
-							if (!crossSignal) {
-								if (distance < distanceToSignal + .25) {
-									// Collect and reset the signal chain because none were blocked
-									trackingCrossSignal.setValue(null);
-									reserveChain();
-									return false;
-								} else
-									return true; // End of a blocked signal chain
-							}
-						}
-
-						return false;
-
-					}, (distance, edge) -> {
-						BezierConnection turn = edge.getTurn();
-						double vDistance = Math.abs(turn.starts.getFirst().y - turn.starts.getSecond().y);
-
-						// ignore turn if its a straight & mild slope
-						if (turn != null && vDistance > 1 / 16f) {
-							if (turn.axes.getFirst()
-								.multiply(1, 0, 1)
-								.distanceTo(turn.axes.getSecond()
-									.multiply(1, 0, 1)
-									.scale(-1)) < 1 / 64f
-								&& vDistance / turn.getLength() < .225f)
-								return;
-						}
-
-						float current = curveDistanceTracker.floatValue();
-						if (current == -1 || distance < current)
-							curveDistanceTracker.setValue(distance);
-					});
+					signalScoutSignalListener, signalScoutTurnListener);
 
 				if (trackingCrossSignal.getValue() != null && waitingForSignal == null)
 					reserveChain();
@@ -353,6 +365,9 @@ public class Navigation {
 	public ITrackSelector controlSignalScout() {
 		if (destination == null)
 			return signalScout.steer(train.manualSteer, new Vec3(0, 1, 0));
+		if (currentPath.isEmpty())
+			return (graph, pair) -> pair.getSecond()
+				.get(0);
 		List<Couple<TrackNode>> pathCopy = new ArrayList<>(currentPath);
 		return (graph, pair) -> navigateOptions(pathCopy, graph, pair.getSecond());
 	}

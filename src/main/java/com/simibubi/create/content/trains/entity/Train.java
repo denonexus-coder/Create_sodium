@@ -139,6 +139,8 @@ public class Train {
 	int ticksSinceLastMailTransfer;
 	double[] stress;
 
+	private Vec3 collisionCheckPosition;
+
 	// advancements
 	public Player backwardsDriver;
 
@@ -253,6 +255,7 @@ public class Train {
 		Create.RAILWAYS.markTracksDirty();
 
 		if (graph == null) {
+			collisionCheckPosition = null;
 			carriages.forEach(c -> c.manageEntities(level));
 			updateConductors();
 			return;
@@ -420,6 +423,8 @@ public class Train {
 			status.trackOK();
 
 		updateNavigationTarget(level, distance);
+
+		updateCollisionCheckPosition();
 	}
 
 	public IEdgePointListener frontSignalListener() {
@@ -583,6 +588,19 @@ public class Train {
 		return false;
 	}
 
+	private void updateCollisionCheckPosition() {
+		if (graph == null || carriages.isEmpty()) {
+			collisionCheckPosition = null;
+			return;
+		}
+		TravellingPoint leading = carriages.get(0)
+			.getLeadingPoint();
+		if (leading.edge == null)
+			collisionCheckPosition = null;
+		else
+			collisionCheckPosition = leading.getPosition(graph);
+	}
+
 	private void collideWithOtherTrains(Level level, Carriage carriage) {
 		if (derailed)
 			return;
@@ -617,12 +635,20 @@ public class Train {
 
 	public Pair<Train, Vec3> findCollidingTrain(Level level, Vec3 start, Vec3 end, ResourceKey<Level> dimension) {
 		Vec3 diff = end.subtract(start);
-		double maxDistanceSqr = Math.pow(AllConfigs.server().trains.maxAssemblyLength.get(), 2.0);
+		double maxAssemblyLength = AllConfigs.server().trains.maxAssemblyLength.get();
+		double maxDistanceSqr = Math.pow(maxAssemblyLength, 2.0);
+		double broadPhaseDistanceSqr = Math.pow(maxAssemblyLength * 2 + 16, 2.0);
+		Vec3 normedDiff = diff.normalize();
+		double diffLength = diff.length();
 
 		Trains: for (Train train : Create.RAILWAYS.sided(level).trains.values()) {
 			if (train == this)
 				continue;
 			if (train.graph != null && train.graph != graph)
+				continue;
+
+			Vec3 broadPhasePos = train.collisionCheckPosition;
+			if (broadPhasePos != null && broadPhasePos.distanceToSqr(start) > broadPhaseDistanceSqr)
 				continue;
 
 			Vec3 lastPoint = null;
@@ -660,7 +686,6 @@ public class Train {
 						continue;
 
 					Vec3 diff2 = end2.subtract(start2);
-					Vec3 normedDiff = diff.normalize();
 					Vec3 normedDiff2 = diff2.normalize();
 					double[] intersect = VecHelper.intersect(start, start2, normedDiff, normedDiff2, Axis.Y);
 
@@ -676,7 +701,7 @@ public class Train {
 						intersect[1] = intersectSphere.distanceTo(start2) - .125;
 					}
 
-					if (intersect[0] > diff.length())
+					if (intersect[0] > diffLength)
 						continue;
 					if (intersect[1] > diff2.length())
 						continue;
