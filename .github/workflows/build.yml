@@ -13,6 +13,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Read from the repository secrets so the publish steps can tell whether they run
+      # in a repository that actually has credentials (upstream does, a fork does not).
+      # It has to live at the job level: the secrets context is not available in a
+      # step's if, and using it there makes the whole workflow invalid.
+      MAVEN_USER: ${{ secrets.MAVEN_USER }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -36,14 +42,14 @@ jobs:
       #   run: ./gradlew runGametestServer
 
       - name: Publish to Maven [Releases]
-        if: ${{ github.event.inputs.release == 'true' && secrets.MAVEN_USER != '' }}
+        if: ${{ github.event.inputs.release == 'true' && env.MAVEN_USER != '' }}
         run: >-
           ./gradlew publishAllPublicationsToDevOsReleasesRepository
           -PdevOsReleasesUsername="${{ secrets.MAVEN_USER }}"
           -PdevOsReleasesPassword="${{ secrets.MAVEN_PASS }}"
 
       - name: Publish to Maven [Snapshots]
-        if: ${{ github.event.inputs.release != 'true' && secrets.MAVEN_USER != '' }}
+        if: ${{ github.event.inputs.release != 'true' && env.MAVEN_USER != '' }}
         run: >-
           ./gradlew publishAllPublicationsToDevOsSnapshotsRepository
           -PdevOsSnapshotsUsername="${{ secrets.MAVEN_USER }}"
