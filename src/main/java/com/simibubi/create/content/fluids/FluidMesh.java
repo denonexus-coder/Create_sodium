@@ -3,6 +3,7 @@ package com.simibubi.create.content.fluids;
 import org.joml.Vector4f;
 import org.joml.Vector4fc;
 
+import com.simibubi.create.infrastructure.config.AllConfigs;
 import dev.engine_room.flywheel.api.material.CardinalLightingMode;
 import dev.engine_room.flywheel.api.material.Transparency;
 import dev.engine_room.flywheel.api.model.Model;
@@ -33,10 +34,17 @@ public class FluidMesh {
 	}
 
 	private static SimpleMaterial material(TextureAtlasSprite sprite) {
+		// ORDER_INDEPENDENT makes the backend run the full OIT pipeline (several color
+		// attachments plus a handful of full screen passes), which is very expensive on a
+		// tile-based GPU. TRANSLUCENT is the fallback the transparency contract mandates for
+		// backends without OIT, and the fluid meshes are flat quads or a tube, so it only
+		// changes anything where two fluids overlap on screen.
 		return SimpleMaterial.builder()
 			.cardinalLightingMode(CardinalLightingMode.OFF)
 			.texture(sprite.atlasLocation())
-			.transparency(Transparency.ORDER_INDEPENDENT)
+			.transparency(AllConfigs.client().orderIndependentFluidTransparency.get()
+				? Transparency.ORDER_INDEPENDENT
+				: Transparency.TRANSLUCENT)
 			.build();
 	}
 

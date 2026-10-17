@@ -21,6 +21,8 @@ public class CClient extends ConfigBase {
 	public final ConfigFloat fanParticleDensity = f(.5f, 0, 1, "fanParticleDensity",
 			Comments.fanParticleDensity);
 	public final ConfigFloat filterItemRenderDistance = f(10f, 1, "filterItemRenderDistance", Comments.filterItemRenderDistance);
+	public final ConfigBool orderIndependentFluidTransparency =
+		b(false, "orderIndependentFluidTransparency", Comments.orderIndependentFluidTransparency);
 	// no group
 	public final ConfigInt mainMenuConfigButtonRow = i(2, 0, 4, "mainMenuConfigButtonRow",
 			Comments.mainMenuConfigButtonRow);
@@ -110,6 +112,11 @@ public class CClient extends ConfigBase {
 		static String[] filterItemRenderDistance = new String[]{
 				"[in Blocks]",
 				"Maximum Distance to the player at which items in Blocks' filter slots will be displayed"
+		};
+		static String[] orderIndependentFluidTransparency = new String[]{
+				"Draw Create's fluid streams and surfaces with order-independent transparency",
+				"Fixes the blending order where several fluids overlap, but costs a lot of",
+				"bandwidth on mobile and other tile-based GPUs; leave it off there"
 		};
 		static String[] mainMenuConfigButtonRow = new String[]{
 				"Choose the menu row that the Create config button appears on in the main menu",
